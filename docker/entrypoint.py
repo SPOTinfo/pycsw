@@ -48,6 +48,7 @@ from time import sleep
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.sql import text
 
 from pycsw.core import admin
 from pycsw.server import EnvInterpolation
@@ -138,7 +139,8 @@ def _wait_for_postgresql_db(database_url, max_tries=10, wait_seconds=3):
     current_try = 0
     while current_try < max_tries:
         try:
-            engine.execute("SELECT version();")
+            conn = engine.connect()
+            conn.execute(text("SELECT version();"))
             logger.debug("Database is already up!")
             break
         except OperationalError:

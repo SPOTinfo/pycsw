@@ -38,14 +38,16 @@ import os
 
 from shapely.wkt import loads
 try:
-    from shapely.errors import ReadingError
-except:
-    from shapely.geos import ReadingError
+    from shapely.errors import ShapelyError as ReadingError
+except ImportError:
+    try:
+        from shapely.errors import ReadingError
+    except ImportError:
+        from shapely.geos import ReadingError
 
 from sqlalchemy import create_engine, func, __version__, select
 from sqlalchemy.sql import text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import create_session
+from sqlalchemy.orm import declarative_base, Session
 
 from pycsw.core import util
 from pycsw.core.etree import etree
@@ -103,7 +105,7 @@ class Repository(object):
 
         self.engine = Repository.create_engine('%s' % database)
 
-        base = declarative_base(bind=self.engine)
+        base = declarative_base()
 
         LOGGER.info('binding ORM to existing database')
 
@@ -117,7 +119,7 @@ class Repository(object):
             {
                 "__tablename__": table_name,
                 "__table_args__": {
-                    "autoload": True,
+                    "autoload_with": self.engine,
                     "schema": schema_name or None,
                 },
             }
@@ -125,14 +127,14 @@ class Repository(object):
 
         self.dbtype = self.engine.name
 
-        self.session = create_session(self.engine)
+        self.session = Session(self.engine)
 
         temp_dbtype = None
 
         if self.dbtype == 'postgresql':
             # check if PostgreSQL is enabled with PostGIS 1.x
             try:
-                self.session.execute(select([func.postgis_version()]))
+                self.session.execute(select(func.postgis_version()))
                 temp_dbtype = 'postgresql+postgis+wkt'
                 LOGGER.debug('PostgreSQL+PostGIS1+WKT detected')
             except Exception as err:
@@ -140,7 +142,7 @@ class Repository(object):
 
             # check if PostgreSQL is enabled with PostGIS 2.x
             try:
-                self.session.execute('select(postgis_version())')
+                self.session.execute(text('select postgis_version()'))
                 temp_dbtype = 'postgresql+postgis+wkt'
                 LOGGER.debug('PostgreSQL+PostGIS2+WKT detected')
             except Exception as err:
@@ -149,21 +151,24 @@ class Repository(object):
             # check if a native PostGIS geometry column exists
             try:
                 result = self.session.execute(
-                    "select f_geometry_column "
-                    "from geometry_columns "
-                    "where f_table_name = '%s' "
-                    "and f_geometry_column != 'wkt_geometry' "
-                    "limit 1;" % table_name
+                    text(
+                        "select f_geometry_column "
+                        "from geometry_columns "
+                        "where f_table_name = :tname "
+                        "and f_geometry_column != 'wkt_geometry' "
+                        "limit 1;"
+                    ),
+                    {'tname': table_name}
                 )
                 row = result.fetchone()
-                self.postgis_geometry_column = str(row['f_geometry_column'])
+                self.postgis_geometry_column = str(row[0])
                 temp_dbtype = 'postgresql+postgis+native'
                 LOGGER.debug('PostgreSQL+PostGIS+Native detected')
             except Exception as err:
                 LOGGER.exception('PostgreSQL+PostGIS+Native not picked up: %s')
 
             # check if a native PostgreSQL FTS GIN index exists
-            result = self.session.execute("select relname from pg_class where relname='fts_gin_idx'").scalar()
+            result = self.session.execute(text("select relname from pg_class where relname='fts_gin_idx'")).scalar()
             self.fts = bool(result)
             LOGGER.debug('PostgreSQL FTS enabled: %r', self.fts)
 
