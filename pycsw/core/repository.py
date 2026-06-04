@@ -160,8 +160,8 @@ class Repository(object):
                     ),
                     {'tname': table_name}
                 )
-                row = result.fetchone()
-                self.postgis_geometry_column = str(row[0])
+                row = result.mappings().fetchone()
+                self.postgis_geometry_column = str(row['f_geometry_column'])
                 temp_dbtype = 'postgresql+postgis+native'
                 LOGGER.debug('PostgreSQL+PostGIS+Native detected')
             except Exception as err:
